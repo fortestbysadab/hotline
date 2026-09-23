@@ -1,0 +1,25 @@
+{
+  "name": "hotline-backend",
+  "version": "0.1.0",
+  "description": "Private Hotline — untrusted signaling server: invite relay, E2EE message relay, WebRTC signaling, presence.",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "optionalDependencies": {
+    "firebase-admin": "^12.7.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

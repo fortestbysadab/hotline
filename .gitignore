@@ -1,0 +1,7 @@
+# Flask app artifacts (Flutter will add its own via app/.gitignore)
+.dart_tool/
+.packages
+build/
+.flutter-plugins*
+.idea/
+*.iml
