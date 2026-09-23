@@ -90,6 +90,7 @@ await step('POST /api/owner/register', async () => {
     ownerId: OWNER_ID,
     identityPubKey: crypto.randomBytes(32).toString('base64'),
     signedPrekey: crypto.randomBytes(32).toString('base64'),
+    signingPubKey: crypto.randomBytes(32).toString('base64'),
     prekeySignature: crypto.randomBytes(64).toString('base64'),
   };
   const res = await fetch(`${base}/owner/register`, {
@@ -111,7 +112,10 @@ await step('owner register rejects bad token', async () => {
 // --- 3. invite lifecycle --------------------------------------------------------
 let inviteCode, pair;
 await step('POST /api/invites returns single-use code', async () => {
-  const res = await fetch(`${base}/invites`, { method: 'POST', headers: authHeaders });
+  const res = await fetch(`${base}/invites`, {
+    method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ ownerId: OWNER_ID }),
+  });
   assert.equal(res.status, 201);
   const body = await res.json();
   assert.ok(body.code.length >= 20);
@@ -128,7 +132,6 @@ await step('redeem exchanges code for pair + owner prekey bundle', async () => {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       code: inviteCode,
-      ownerId: OWNER_ID,
       clientPubKey: crypto.randomBytes(32).toString('base64'),
       clientDisplayName: 'Test Guest',
     }),
@@ -137,20 +140,29 @@ await step('redeem exchanges code for pair + owner prekey bundle', async () => {
   pair = await res.json();
   assert.ok(pair.pairId && pair.pairSecret);
   assert.equal(pair.ownerIdentityPubKey, ownerBundle.identityPubKey);
+  assert.equal(pair.ownerSigningPubKey, ownerBundle.signingPubKey);
 });
 
 await step('redeem is single-use (second use → 409)', async () => {
   const res = await fetch(`${base}/invites/redeem`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: inviteCode, ownerId: OWNER_ID, clientPubKey: 'x' }),
+    body: JSON.stringify({ code: inviteCode, clientPubKey: 'x' }),
   });
   assert.equal(res.status, 409);
 });
 
-await step('unknown code → 404', async () => {
+await step('malformed code → 400', async () => {
   const res = await fetch(`${base}/invites/redeem`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: 'garbage', ownerId: OWNER_ID, clientPubKey: 'x' }),
+    body: JSON.stringify({ code: 'garbage', clientPubKey: 'x' }),
+  });
+  assert.equal(res.status, 400);
+});
+
+await step('well-formed but unknown code → 404', async () => {
+  const res = await fetch(`${base}/invites/redeem`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: `${OWNER_ID}~definitely-not-a-real-code`, clientPubKey: 'x' }),
   });
   assert.equal(res.status, 404);
 });

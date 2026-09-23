@@ -40,18 +40,24 @@ export function apiRouter(store, cfg) {
    * Idempotent: re-registers/refreshes the prekey bundle.
    */
   router.post('/owner/register', requireOwner, async (req, res) => {
-    const { ownerId, identityPubKey, signedPrekey, prekeySignature } = req.body ?? {};
-    if (!ownerId || !identityPubKey || !signedPrekey) {
-      return res.status(400).json({ error: 'ownerId, identityPubKey and signedPrekey are required' });
+    const { ownerId, identityPubKey, signedPrekey, prekeySignature, signingPubKey } = req.body ?? {};
+    if (!ownerId || !identityPubKey || !signedPrekey || !signingPubKey) {
+      return res.status(400).json({ error: 'ownerId, identityPubKey, signedPrekey and signingPubKey are required' });
     }
     const existing = await store.getOwner(ownerId);
     const owner = await (existing
-      ? store.updateOwner(ownerId, { identityPubKey, signedPrekey, prekeySignature: prekeySignature ?? null })
+      ? store.updateOwner(ownerId, {
+          identityPubKey,
+          signedPrekey,
+          prekeySignature: prekeySignature ?? null,
+          signingPubKey,
+        })
       : store.saveOwner({
           ownerId,
           identityPubKey,
           signedPrekey,
           prekeySignature: prekeySignature ?? null,
+          signingPubKey,
           createdAt: Date.now(),
         }));
     res.json({ ok: true, owner });
@@ -61,13 +67,24 @@ export function apiRouter(store, cfg) {
 
   /**
    * POST /api/invites  (owner)
+   * { ownerId }
    * → { code, expiresAt }  The plaintext code is returned exactly once.
+   *
+   * Codes are self-contained: "<ownerId>~<random>", so a guest only ever
+   * handles a single string. Only the SHA-256 of the full code is stored.
    */
-  router.post('/invites', requireOwner, async (_req, res) => {
-    const code = crypto.randomBytes(config.inviteCodeBytes).toString('base64url');
+  router.post('/invites', requireOwner, async (req, res) => {
+    const { ownerId } = req.body ?? {};
+    if (!ownerId) return res.status(400).json({ error: 'ownerId required' });
+    const owner = await store.getOwner(ownerId);
+    if (!owner) return res.status(404).json({ error: 'owner not found — register the owner identity first' });
+
+    const random = crypto.randomBytes(config.inviteCodeBytes).toString('base64url');
+    const code = `${ownerId}~${random}`;
     const expiresAt = Date.now() + config.inviteTtlHours * 3600 * 1000;
     const invite = {
       codeHash: sha256(code),
+      ownerId,
       createdAt: Date.now(),
       expiresAt,
     };
@@ -87,16 +104,20 @@ export function apiRouter(store, cfg) {
 
   /**
    * POST /api/invites/redeem  (client — no auth beyond the code itself)
-   * { code, ownerId, clientPubKey, clientDisplayName? }
-   * → { pairId, pairSecret, ownerId, ownerIdentityPubKey, ownerSignedPrekey }
+   * { code, clientPubKey, clientSigningPub?, clientDisplayName? }
+   * → { pairId, pairSecret, ownerId, ownerIdentityPubKey, ownerSignedPrekey,
+   *     ownerSigningPubKey }
    *
    * Creates the pair atomically with consuming the invite.
    */
   router.post('/invites/redeem', async (req, res) => {
-    const { code, ownerId, clientPubKey, clientDisplayName } = req.body ?? {};
-    if (!code || !ownerId || !clientPubKey) {
-      return res.status(400).json({ error: 'code, ownerId and clientPubKey are required' });
+    const { code, clientPubKey, clientSigningPub, clientDisplayName } = req.body ?? {};
+    if (!code || !clientPubKey) {
+      return res.status(400).json({ error: 'code and clientPubKey are required' });
     }
+    const sep = code.indexOf('~');
+    if (sep <= 0) return res.status(400).json({ error: 'malformed code' });
+    const ownerId = code.slice(0, sep);
     const owner = await store.getOwner(ownerId);
     if (!owner) return res.status(404).json({ error: 'owner not found' });
 
@@ -111,6 +132,7 @@ export function apiRouter(store, cfg) {
       pairId,
       ownerId,
       clientPubKey,
+      clientSigningPub: clientSigningPub ?? null,
       clientDisplayName: clientDisplayName ?? null,
       pairSecretHash: sha256(pairSecret),
       status: 'active',
@@ -123,6 +145,7 @@ export function apiRouter(store, cfg) {
       ownerId,
       ownerIdentityPubKey: owner.identityPubKey,
       ownerSignedPrekey: owner.signedPrekey,
+      ownerSigningPubKey: owner.signingPubKey ?? null,
       prekeySignature: owner.prekeySignature ?? null,
       createdAt: pair.createdAt,
     });
