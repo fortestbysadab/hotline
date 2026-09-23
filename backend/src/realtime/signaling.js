@@ -18,6 +18,7 @@
  *         ─ presence {role, online}, pair:revoked, hello {iceServers}
  */
 import { sha256 } from '../store/index.js';
+import { resolveOwnerToken } from '../config.js';
 
 /** pairId -> { owner: Set<socketId>, client: Set<socketId> } */
 const presence = new Map();
@@ -58,7 +59,13 @@ export function attachRealtime(io, store, config) {
         return;
       }
       const pair = await store.getPair(pairId);
-      if (!pair || pair.pairSecretHash !== sha256(secret)) {
+      const pairSecretOk = pair && pair.pairSecretHash === sha256(secret);
+      // Owner-role sockets may alternatively authenticate with the shared
+      // OWNER_TOKEN — the owner device never learns per-pair secrets (those
+      // are handed only to the redeeming client).
+      const ownerTokenOk =
+        role === 'owner' && config.ownerToken !== undefined && secret === (config.ownerToken || resolveOwnerToken());
+      if (!pair || (!pairSecretOk && !ownerTokenOk)) {
         socket.emit('auth:error', { error: 'invalid pair credentials' });
         socket.disconnect(true);
         return;
